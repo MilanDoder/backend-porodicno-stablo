@@ -31,7 +31,7 @@ public class Profile
 
 public class Announcement
 {
-    public long Id { get; set; }
+    public Guid Id { get; set; }
     public string Message { get; set; } = "";
     public DateOnly ExpiresAt { get; set; }
     public Guid? CreatedBy { get; set; }
