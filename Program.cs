@@ -34,9 +34,6 @@ builder.Services.AddControllers().AddJsonOptions(o =>
 });
 
 // ── Autentikacija: validacija Supabase JWT tokena ────────────────────────────
-// Podržana su oba načina:
-//  1) Supabase:JwtSecret (legacy HS256 "JWT Secret" iz dashboarda) — preporučeno, najjednostavnije
-//  2) bez secreta — povlači JWKS (novi asimetrični ključevi) sa /auth/v1/.well-known/jwks.json
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
@@ -80,6 +77,16 @@ builder.Services
                 }
             };
         }
+
+        // DIJAGNOSTIKA: ispiši tačan razlog neuspešne validacije u log (Render Logs).
+        o.Events = new JwtBearerEvents
+        {
+            OnAuthenticationFailed = ctx =>
+            {
+                Console.WriteLine($"[JWT FAIL] {ctx.Exception.GetType().Name}: {ctx.Exception.Message}");
+                return Task.CompletedTask;
+            }
+        };
     });
 
 builder.Services.AddAuthorizationBuilder()
@@ -93,7 +100,6 @@ builder.Services.AddHttpClient<SupabaseStorageService>();
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
     o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    // Proxy Rendera nije statičan po IP-ju, pa praznimo liste da middleware ne odbija zaglavlja
     o.KnownNetworks.Clear();
     o.KnownProxies.Clear();
 });
