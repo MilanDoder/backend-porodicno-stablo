@@ -56,26 +56,10 @@ builder.Services
         }
         else
         {
-            // Ne fetch-ujemo JWKS samo jednom na startu (to zamrzava ključeve zauvek) —
-            // keš od 10 min: ako je istekao, povučemo svež JWKS pri sledećoj validaciji.
-            IEnumerable<SecurityKey>? cachedKeys = null;
-            DateTime cacheExpiry = DateTime.MinValue;
-            var cacheLock = new object();
-
-            o.TokenValidationParameters.IssuerSigningKeyResolver = (t, securityToken, kid, parameters) =>
-            {
-                lock (cacheLock)
-                {
-                    if (cachedKeys is not null && DateTime.UtcNow < cacheExpiry)
-                        return cachedKeys;
-
-                    using var http = new HttpClient();
-                    var jwks = http.GetStringAsync($"{jwtIssuer}/.well-known/jwks.json").GetAwaiter().GetResult();
-                    cachedKeys = new JsonWebKeySet(jwks).GetSigningKeys();
-                    cacheExpiry = DateTime.UtcNow.AddMinutes(10);
-                    return cachedKeys;
-                }
-            };
+            // Ugrađeni ConfigurationManager za JWKS: sam radi kid-matching, keširanje i refresh
+            // pri rotaciji ključeva. Pouzdaniji od ručnog resolver-a.
+            o.MetadataAddress = $"{jwtIssuer}/.well-known/openid-configuration";
+            o.TokenValidationParameters.ValidateIssuerSigningKey = true;
         }
 
         // DIJAGNOSTIKA: ispiši tačan razlog neuspešne validacije u log (Render Logs).
