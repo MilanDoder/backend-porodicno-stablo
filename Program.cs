@@ -60,21 +60,24 @@ builder.Services
         else
         {
             // Ne fetch-ujemo JWKS samo jednom na startu (to zamrzava ključeve zauvek) —
-            // resolver se poziva pri validaciji, sa kešom od 10 min da ne bombardujemo Supabase.
-            var jwksCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(
-                new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
-            const string jwksKey = "supabase-jwks";
+            // keš od 10 min: ako je istekao, povučemo svež JWKS pri sledećoj validaciji.
+            IEnumerable<SecurityKey>? cachedKeys = null;
+            DateTime cacheExpiry = DateTime.MinValue;
+            var cacheLock = new object();
 
             o.TokenValidationParameters.IssuerSigningKeyResolver = (t, securityToken, kid, parameters) =>
             {
-                if (jwksCache.TryGetValue(jwksKey, out IEnumerable<SecurityKey>? cached) && cached is not null)
-                    return cached;
+                lock (cacheLock)
+                {
+                    if (cachedKeys is not null && DateTime.UtcNow < cacheExpiry)
+                        return cachedKeys;
 
-                using var http = new HttpClient();
-                var jwks = http.GetStringAsync($"{jwtIssuer}/.well-known/jwks.json").GetAwaiter().GetResult();
-                var keys = new JsonWebKeySet(jwks).GetSigningKeys();
-                jwksCache.Set(jwksKey, keys, TimeSpan.FromMinutes(10));
-                return keys;
+                    using var http = new HttpClient();
+                    var jwks = http.GetStringAsync($"{jwtIssuer}/.well-known/jwks.json").GetAwaiter().GetResult();
+                    cachedKeys = new JsonWebKeySet(jwks).GetSigningKeys();
+                    cacheExpiry = DateTime.UtcNow.AddMinutes(10);
+                    return cachedKeys;
+                }
             };
         }
     });
