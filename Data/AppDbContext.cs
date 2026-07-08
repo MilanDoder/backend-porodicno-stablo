@@ -133,4 +133,29 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.SpouseName).HasColumnName("spouse_name");
             e.Property(x => x.EditedMemberId).HasColumnName("edited_member_id");
             e.Property(x => x.Title).HasColumnName("title");
-            e.Property(x =>
+            e.Property(x => x.Content).HasColumnName("content");
+            e.Property(x => x.ImageData).HasColumnName("image_data");
+            e.Property(x => x.ImageType).HasColumnName("image_type");
+            e.Property(x => x.PhotoYear).HasColumnName("photo_year");
+            e.Property(x => x.StoryDate).HasColumnName("story_date");
+            e.Property(x => x.HavePdf).HasColumnName("have_pdf");
+            e.Property(x => x.PdfPath).HasColumnName("pdf_path");
+            e.Property(x => x.ExpiresAt).HasColumnName("expires_at");
+
+            // parent_ids: supabase-js šalje JS niz → pretpostavljena kolona jsonb.
+            // Ako je kolona tipa int8[]/int4[], vidi napomenu u README (mapiranje u jednoj liniji).
+            var jsonOpts = (JsonSerializerOptions?)null;
+            e.Property(x => x.ParentIds)
+                .HasColumnName("parent_ids")
+                .HasColumnType("jsonb")
+                .HasConversion(
+                    new ValueConverter<List<long>?, string?>(
+                        v => v == null ? null : JsonSerializer.Serialize(v, jsonOpts),
+                        v => v == null ? null : JsonSerializer.Deserialize<List<long>>(v, jsonOpts)),
+                    new ValueComparer<List<long>?>(
+                        (a, c) => (a == null && c == null) || (a != null && c != null && a.SequenceEqual(c)),
+                        v => v == null ? 0 : v.Aggregate(0, (h, i) => HashCode.Combine(h, i.GetHashCode())),
+                        v => v == null ? null : v.ToList()));
+        });
+    }
+}
