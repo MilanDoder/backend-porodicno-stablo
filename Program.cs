@@ -56,15 +56,43 @@ builder.Services
         }
         else
         {
-            // Ugrađeni ConfigurationManager za JWKS: sam radi kid-matching, keširanje i refresh
-            // pri rotaciji ključeva. Pouzdaniji od ručnog resolver-a.
-            o.MetadataAddress = $"{jwtIssuer}/.well-known/openid-configuration";
-            o.TokenValidationParameters.ValidateIssuerSigningKey = true;
+            // JWKS je javan (bez apikey headera). Povlačimo ga jednom, pouzdano, pri konfiguraciji.
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            var jwks = http.GetStringAsync($"{jwtIssuer}/.well-known/jwks.json").GetAwaiter().GetResult();
+            var keys = new JsonWebKeySet(jwks).GetSigningKeys();
+            o.TokenValidationParameters.IssuerSigningKeys = keys;
+            Console.WriteLine($"[JWKS] Ucitano kljuceva na startu: {keys.Count()}");
         }
 
         // DIJAGNOSTIKA: ispiši tačan razlog neuspešne validacije u log (Render Logs).
         o.Events = new JwtBearerEvents
         {
+            OnMessageReceived = ctx =>
+            {
+                var auth = ctx.Request.Headers.Authorization.ToString();
+                if (auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                {
+                    var token = auth["Bearer ".Length..];
+                    var firstDot = token.IndexOf('.');
+                    if (firstDot > 0)
+                    {
+                        var headerB64 = token[..firstDot];
+                        headerB64 = headerB64.Replace('-', '+').Replace('_', '/');
+                        headerB64 = headerB64.PadRight(headerB64.Length + (4 - headerB64.Length % 4) % 4, '=');
+                        try
+                        {
+                            var headerJson = Encoding.UTF8.GetString(Convert.FromBase64String(headerB64));
+                            Console.WriteLine($"[JWT HEADER] {headerJson}");
+                        }
+                        catch { Console.WriteLine("[JWT HEADER] ne mogu da dekodujem header"); }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"[JWT] Nema Bearer tokena. Authorization='{auth}'");
+                }
+                return Task.CompletedTask;
+            },
             OnAuthenticationFailed = ctx =>
             {
                 Console.WriteLine($"[JWT FAIL] {ctx.Exception.GetType().Name}: {ctx.Exception.Message}");
