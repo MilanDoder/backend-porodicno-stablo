@@ -1,0 +1,23 @@
+## Visual Studio
+.vs/
+*.user
+*.suo
+
+## Build results
+bin/
+obj/
+out/
+
+## Rider / VS Code
+.idea/
+.vscode/
+
+## OS files
+.DS_Store
+Thumbs.db
+
+## Secrets / local config (podesi po potrebi)
+appsettings.Development.json
+appsettings.Local.json
+*.env
+.env
