@@ -121,4 +121,7 @@ app.UseSwaggerUI();
 
 app.UseCors();
 app.UseAuthentication();
-app.UseAuthorizatio
+app.UseAuthorization();
+app.MapControllers();
+
+app.Run();
