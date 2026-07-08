@@ -34,6 +34,9 @@ builder.Services.AddControllers().AddJsonOptions(o =>
 });
 
 // ── Autentikacija: validacija Supabase JWT tokena ────────────────────────────
+// Podržana su oba načina:
+//  1) Supabase:JwtSecret (legacy HS256 "JWT Secret" iz dashboarda)
+//  2) bez secreta — povlači JWKS (novi asimetrični ključevi) sa /auth/v1/.well-known/jwks.json
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
@@ -56,49 +59,11 @@ builder.Services
         }
         else
         {
-            // JWKS je javan (bez apikey headera). Povlačimo ga jednom, pouzdano, pri konfiguraciji.
+            // JWKS je javan (bez apikey headera). Povlačimo ga jednom pri konfiguraciji.
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
             var jwks = http.GetStringAsync($"{jwtIssuer}/.well-known/jwks.json").GetAwaiter().GetResult();
-            var keys = new JsonWebKeySet(jwks).GetSigningKeys();
-            o.TokenValidationParameters.IssuerSigningKeys = keys;
-            Console.WriteLine($"[JWKS] Ucitano kljuceva na startu: {keys.Count()}");
+            o.TokenValidationParameters.IssuerSigningKeys = new JsonWebKeySet(jwks).GetSigningKeys();
         }
-
-        // DIJAGNOSTIKA: ispiši tačan razlog neuspešne validacije u log (Render Logs).
-        o.Events = new JwtBearerEvents
-        {
-            OnMessageReceived = ctx =>
-            {
-                var auth = ctx.Request.Headers.Authorization.ToString();
-                if (auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-                {
-                    var token = auth["Bearer ".Length..];
-                    var firstDot = token.IndexOf('.');
-                    if (firstDot > 0)
-                    {
-                        var headerB64 = token[..firstDot];
-                        headerB64 = headerB64.Replace('-', '+').Replace('_', '/');
-                        headerB64 = headerB64.PadRight(headerB64.Length + (4 - headerB64.Length % 4) % 4, '=');
-                        try
-                        {
-                            var headerJson = Encoding.UTF8.GetString(Convert.FromBase64String(headerB64));
-                            Console.WriteLine($"[JWT HEADER] {headerJson}");
-                        }
-                        catch { Console.WriteLine("[JWT HEADER] ne mogu da dekodujem header"); }
-                    }
-                }
-                else
-                {
-                    Console.WriteLine($"[JWT] Nema Bearer tokena. Authorization='{auth}'");
-                }
-                return Task.CompletedTask;
-            },
-            OnAuthenticationFailed = ctx =>
-            {
-                Console.WriteLine($"[JWT FAIL] {ctx.Exception.GetType().Name}: {ctx.Exception.Message}");
-                return Task.CompletedTask;
-            }
-        };
     });
 
 builder.Services.AddAuthorizationBuilder()
@@ -112,6 +77,7 @@ builder.Services.AddHttpClient<SupabaseStorageService>();
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
     o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    // Proxy Rendera nije statičan po IP-ju, pa praznimo liste da middleware ne odbija zaglavlja
     o.KnownNetworks.Clear();
     o.KnownProxies.Clear();
 });
@@ -155,7 +121,4 @@ app.UseSwaggerUI();
 
 app.UseCors();
 app.UseAuthentication();
-app.UseAuthorization();
-app.MapControllers();
-
-app.Run();
+app.UseAuthorizatio
