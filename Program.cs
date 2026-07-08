@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -11,6 +12,13 @@ using PorodicnoStablo.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 var cfg = builder.Configuration;
+
+// ── Render (i slični PaaS) ubacuju PORT env var i očekuju da server sluša na njemu ──
+var renderPort = Environment.GetEnvironmentVariable("PORT");
+if (!string.IsNullOrWhiteSpace(renderPort))
+{
+    builder.WebHost.UseUrls($"http://0.0.0.0:{renderPort}");
+}
 
 var supabaseUrl = (cfg["Supabase:Url"] ?? throw new InvalidOperationException("Supabase:Url nije podešen")).TrimEnd('/');
 var jwtIssuer = $"{supabaseUrl}/auth/v1";
@@ -64,6 +72,15 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IClaimsTransformation, ProfileClaimsTransformation>();
 builder.Services.AddHttpClient<SupabaseStorageService>();
 
+// ── Forwarded headers: Render (i drugi PaaS) stoje iza reverse proxy-ja ─────
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    // Proxy Rendera nije statičan po IP-ju, pa praznimo liste da middleware ne odbija zaglavlja
+    o.KnownNetworks.Clear();
+    o.KnownProxies.Clear();
+});
+
 // ── CORS ─────────────────────────────────────────────────────────────────────
 var origins = cfg.GetSection("Cors:Origins").Get<string[]>() ?? ["http://localhost:5173"];
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
@@ -95,6 +112,8 @@ builder.Services.AddSwaggerGen(o =>
 });
 
 var app = builder.Build();
+
+app.UseForwardedHeaders();
 
 app.UseSwagger();
 app.UseSwaggerUI();
