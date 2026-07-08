@@ -34,6 +34,9 @@ builder.Services.AddControllers().AddJsonOptions(o =>
 });
 
 // ── Autentikacija: validacija Supabase JWT tokena ────────────────────────────
+// Podržana su oba načina:
+//  1) Supabase:JwtSecret (legacy HS256 "JWT Secret" iz dashboarda) — preporučeno, najjednostavnije
+//  2) bez secreta — povlači JWKS (novi asimetrični ključevi) sa /auth/v1/.well-known/jwks.json
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
@@ -57,18 +60,22 @@ builder.Services
         else
         {
             // Ne fetch-ujemo JWKS samo jednom na startu (to zamrzava ključeve zauvek) —
-            // resolver se poziva pri svakoj validaciji, sa kešom od 10 min da ne bombardujemo Supabase.
+            // resolver se poziva pri validaciji, sa kešom od 10 min da ne bombardujemo Supabase.
             var jwksCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(
                 new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+            const string jwksKey = "supabase-jwks";
 
             o.TokenValidationParameters.IssuerSigningKeyResolver = (t, securityToken, kid, parameters) =>
-                jwksCache.GetOrCreate("supabase-jwks", entry =>
-                {
-                    entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10);
-                    using var http = new HttpClient();
-                    var jwks = http.GetStringAsync($"{jwtIssuer}/.well-known/jwks.json").GetAwaiter().GetResult();
-                    return new JsonWebKeySet(jwks).GetSigningKeys();
-                });
+            {
+                if (jwksCache.TryGetValue(jwksKey, out IEnumerable<SecurityKey>? cached) && cached is not null)
+                    return cached;
+
+                using var http = new HttpClient();
+                var jwks = http.GetStringAsync($"{jwtIssuer}/.well-known/jwks.json").GetAwaiter().GetResult();
+                var keys = new JsonWebKeySet(jwks).GetSigningKeys();
+                jwksCache.Set(jwksKey, keys, TimeSpan.FromMinutes(10));
+                return keys;
+            };
         }
     });
 
@@ -83,6 +90,7 @@ builder.Services.AddHttpClient<SupabaseStorageService>();
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
     o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    // Proxy Rendera nije statičan po IP-ju, pa praznimo liste da middleware ne odbija zaglavlja
     o.KnownNetworks.Clear();
     o.KnownProxies.Clear();
 });
